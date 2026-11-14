@@ -20,6 +20,9 @@ import kotlinx.coroutines.withContext
 private val Context.settingsDataStore by preferencesDataStore(name = "claude_settings")
 
 private val BASE_URL_KEY = stringPreferencesKey("base_url")
+private val MODEL_KEY = stringPreferencesKey("model")
+private val PROTOCOL_KEY = stringPreferencesKey("protocol")
+
 private const val PREFS_NAME = "claude_secure_settings"
 private const val FALLBACK_PREFS_NAME = "claude_secure_settings_fallback"
 private const val API_KEY_PREF = "api_key"
@@ -55,46 +58,64 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
 
     init {
         scope.launch {
-            val storedUrl = runCatching {
-                dataStore.data.map { it[BASE_URL_KEY] ?: "" }.first()
-            }.getOrDefault("")
+            val stored = runCatching {
+                dataStore.data.map { prefs ->
+                    Triple(
+                        prefs[BASE_URL_KEY] ?: "",
+                        prefs[MODEL_KEY] ?: "",
+                        prefs[PROTOCOL_KEY] ?: ""
+                    )
+                }.first()
+            }.getOrDefault(Triple("", "", ""))
             val storedKey = withContext(Dispatchers.IO) {
                 runCatching { prefs.getString(API_KEY_PREF, "").orEmpty() }.getOrDefault("")
             }
-            _state.value = ApiSettings(storedUrl, storedKey)
+            _state.value = ApiSettings(
+                baseUrl = stored.first,
+                apiKey = storedKey,
+                model = stored.second,
+                protocol = parseProtocol(stored.third)
+            )
         }
     }
 
-    suspend fun save(rawBaseUrl: String, rawApiKey: String) {
+    suspend fun save(rawBaseUrl: String, rawApiKey: String, rawModel: String, protocol: ApiProtocol) {
         val baseUrl = normalizeBaseUrl(rawBaseUrl)
         val apiKey = rawApiKey.trim()
+        val model = rawModel.trim()
         withContext(Dispatchers.IO) {
-            runCatching { dataStore.edit { it[BASE_URL_KEY] = baseUrl } }
             runCatching {
-                prefs.edit().putString(API_KEY_PREF, apiKey).apply()
+                dataStore.edit { prefs ->
+                    prefs[BASE_URL_KEY] = baseUrl
+                    prefs[MODEL_KEY] = model
+                    prefs[PROTOCOL_KEY] = protocol.name
+                }
             }
+            runCatching { prefs.edit().putString(API_KEY_PREF, apiKey).apply() }
         }
-        _state.value = ApiSettings(baseUrl, apiKey)
+        _state.value = ApiSettings(baseUrl, apiKey, model, protocol)
     }
 
     suspend fun reset() {
         withContext(Dispatchers.IO) {
-            runCatching { dataStore.edit { it.remove(BASE_URL_KEY) } }
+            runCatching { dataStore.edit { it.clear() } }
             runCatching { prefs.edit().remove(API_KEY_PREF).apply() }
         }
         _state.value = ApiSettings()
     }
 
-    /** The address actually used for a request, with the original as fallback. */
-    fun requestBaseUrl(): String {
-        val raw = override?.baseUrl ?: _state.value.baseUrl
-        val normalized = normalizeBaseUrl(raw)
-        return normalized.ifBlank { ApiDefaults.BASE_URL }
+    /** The values actually used for a request, ready to build it from. */
+    fun current(): ApiSettings = override ?: _state.value.apply {
+        // make sure the fallbacks are applied to a copy, never to stored values
+    }.let { stored ->
+        ApiSettings(
+            baseUrl = stored.baseUrl,
+            apiKey = stored.apiKey,
+            model = stored.model,
+            protocol = stored.protocol
+        )
     }
 
-    /** The key actually sent with a request, with the original as fallback. */
-    fun requestApiKey(): String {
-        val raw = override?.apiKey ?: _state.value.apiKey
-        return raw.trim().ifBlank { ApiDefaults.API_KEY }
-    }
+    private fun parseProtocol(raw: String): ApiProtocol =
+        runCatching { ApiProtocol.valueOf(raw) }.getOrDefault(ApiProtocol.AUTO)
 }

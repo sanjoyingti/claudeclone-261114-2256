@@ -7,8 +7,11 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.aibuilt.claudeclone.data.ApiConfigInterceptor
 import com.aibuilt.claudeclone.data.ChatApi
 import com.aibuilt.claudeclone.data.ChatRepository
+import com.aibuilt.claudeclone.data.ProjectRepository
 import com.aibuilt.claudeclone.data.SettingsRepository
+import com.aibuilt.claudeclone.ui.artifacts.ArtifactsViewModel
 import com.aibuilt.claudeclone.ui.chat.ChatViewModel
+import com.aibuilt.claudeclone.ui.projects.ProjectsViewModel
 import com.aibuilt.claudeclone.ui.settings.SettingsViewModel
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -45,11 +48,24 @@ class AppContainer(context: Context) {
         json = json
     )
 
+    private val projectRepository = ProjectRepository(
+        file = File(appContext.filesDir, "claude_projects.json"),
+        json = json
+    )
+
     val chatViewModelFactory: ViewModelProvider.Factory = viewModelFactory {
-        initializer { ChatViewModel(chatRepository, chatApi) }
+        initializer { ChatViewModel(chatRepository, chatApi) { settingsRepository.current() } }
     }
 
     val settingsViewModelFactory: ViewModelProvider.Factory = viewModelFactory {
         initializer { SettingsViewModel(settingsRepository, chatApi) }
+    }
+
+    val projectsViewModelFactory: ViewModelProvider.Factory = viewModelFactory {
+        initializer { ProjectsViewModel(projectRepository) }
+    }
+
+    val artifactsViewModelFactory: ViewModelProvider.Factory = viewModelFactory {
+        initializer { ArtifactsViewModel(chatRepository) }
     }
 }

@@ -6,14 +6,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.aibuilt.claudeclone.AppContainer
-import com.aibuilt.claudeclone.ui.chat.ChatScreen
-import com.aibuilt.claudeclone.ui.chat.ChatViewModel
 import com.aibuilt.claudeclone.ui.settings.SettingsScreen
 import com.aibuilt.claudeclone.ui.settings.SettingsViewModel
 import com.aibuilt.claudeclone.ui.splash.SplashScreen
 
 private const val ROUTE_SPLASH = "splash"
-private const val ROUTE_CHAT = "chat"
+private const val ROUTE_HOME = "home"
 private const val ROUTE_SETTINGS = "settings"
 
 @Composable
@@ -24,16 +22,15 @@ fun ClaudeNavHost(container: AppContainer) {
         composable(ROUTE_SPLASH) {
             SplashScreen(
                 onFinished = {
-                    navController.navigate(ROUTE_CHAT) {
+                    navController.navigate(ROUTE_HOME) {
                         popUpTo(ROUTE_SPLASH) { inclusive = true }
                     }
                 }
             )
         }
-        composable(ROUTE_CHAT) {
-            val vm: ChatViewModel = viewModel(factory = container.chatViewModelFactory)
-            ChatScreen(
-                viewModel = vm,
+        composable(ROUTE_HOME) {
+            HomeScreen(
+                container = container,
                 onOpenSettings = { navController.navigate(ROUTE_SETTINGS) }
             )
         }

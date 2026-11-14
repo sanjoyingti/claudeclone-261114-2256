@@ -2,6 +2,7 @@ package com.aibuilt.claudeclone.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aibuilt.claudeclone.data.ApiSettings
 import com.aibuilt.claudeclone.data.ChatApi
 import com.aibuilt.claudeclone.data.ChatMessage
 import com.aibuilt.claudeclone.data.ChatRepository
@@ -23,7 +24,8 @@ data class ChatUiState(
 
 class ChatViewModel(
     private val repository: ChatRepository,
-    private val api: ChatApi
+    private val api: ChatApi,
+    private val settingsProvider: () -> ApiSettings
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -88,26 +90,42 @@ class ChatViewModel(
             repository.append(placeholder)
             _state.update { it.copy(isSending = true) }
 
+            val settings = settingsProvider()
+            // failed bubbles are left out so a retry never replays a broken turn
             val history = repository.messages.value
                 .dropLast(1)
                 .filterNot { it.isError }
-            val result = api.sendMessage(history)
-            result
-                .onSuccess { reply ->
-                    repository.replaceLast(placeholder.copy(text = reply))
-                    _state.update { it.copy(isSending = false) }
+
+            var accumulated = ""
+            try {
+                api.streamMessage(
+                    history = history,
+                    model = settings.effectiveModel,
+                    protocol = settings.effectiveProtocol,
+                    baseUrl = settings.effectiveBaseUrl
+                ).collect { chunk ->
+                    accumulated += chunk
+                    repository.replaceLast(placeholder.copy(text = accumulated))
                 }
-                .onFailure { error ->
+                if (accumulated.isBlank()) {
                     repository.replaceLast(
-                        placeholder.copy(
-                            text = error.message ?: "Something went wrong.",
-                            isError = true
-                        )
+                        placeholder.copy(text = "The server sent an empty reply.", isError = true)
                     )
-                    _state.update {
-                        it.copy(isSending = false, snackbar = error.message ?: "Something went wrong.")
-                    }
                 }
+                _state.update { it.copy(isSending = false) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                if (accumulated.isBlank()) {
+                    repository.remove(placeholder.id)
+                } else {
+                    repository.replaceLast(placeholder.copy(text = accumulated))
+                }
+                _state.update { it.copy(isSending = false) }
+                throw cancelled
+            } catch (error: Throwable) {
+                val message = error.message ?: "Something went wrong."
+                repository.replaceLast(placeholder.copy(text = message, isError = true))
+                _state.update { it.copy(isSending = false, snackbar = message) }
+            }
         }
     }
 
